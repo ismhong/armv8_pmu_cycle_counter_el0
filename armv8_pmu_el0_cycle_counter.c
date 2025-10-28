@@ -135,38 +135,40 @@ pmccntr_modify(const char *arg, size_t size)
 static ssize_t
 pmuctl_read(struct file *f, char __user *userbuf, size_t count, loff_t *ppos)
 {
-	char *buf, *cur;
-	ssize_t size;
-	int i;
+	char *buf;
+	ssize_t ret;
+	size_t total_len = 0;
+	size_t buf_size = PAGE_SIZE;
 
 	if (*ppos > 0)
 		return 0;
-	if (count > PAGE_SIZE)
-		return -E2BIG;
-	buf = kzalloc(PAGE_SIZE, GFP_KERNEL);
+
+	buf = kzalloc(buf_size, GFP_KERNEL);
 	if (buf == NULL)
 		return -ENOMEM;
-	cur = buf;
 
 	mutex_lock(&pmuctl_lock);
-	for (i = 0; i < PM_CTL_CNT; i++) {
+	for (int i = 0; i < PM_CTL_CNT; i++) {
 		if (pmu_ctls[i].show == NULL)
 			continue;
 
-		size = pmu_ctls[i].show(cur, count);
-		if (size < 0) {
-			goto err_free;
+		ssize_t len = pmu_ctls[i].show(buf + total_len, buf_size - total_len);
+		if (len < 0) {
+			ret = len;
+			goto out_unlock;
 		}
-		cur += size;
-		count -= size;
+		total_len += len;
 	}
 	mutex_unlock(&pmuctl_lock);
-	size = simple_read_from_buffer(userbuf, count, ppos, buf, cur - buf);
 
-err_free:
+	ret = simple_read_from_buffer(userbuf, count, ppos, buf, total_len);
 	kfree(buf);
+	return ret;
 
-	return size;
+out_unlock:
+	mutex_unlock(&pmuctl_lock);
+	kfree(buf);
+	return ret;
 }
 
 static ssize_t
